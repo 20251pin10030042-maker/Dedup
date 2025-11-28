@@ -2,46 +2,39 @@ import pandas as pd
 import os
 import shutil
 
-# Configurações
-ARQUIVO_CSV = 'emails.csv'  # Certifique-se que está na mesma pasta
-PASTA_SAIDA = './dataset_real_emails'
-LIMITE_ARQUIVOS = 10000  # Limite para não sobrecarregar o I/O do disco
+# --- CONFIGURAÇÕES ---
+ARQUIVO_CSV = '/content/emails.csv.zip'  # Caminho padrão no Colab
+PASTA_SAIDA = '/content/dataset_real_emails'
+LIMITE_ARQUIVOS = 5000  # Comece com 5.000 para testar rápido
 
-def preparar_dataset_real():
-    print(f"--- Lendo {ARQUIVO_CSV} ---")
-    
-    # Cria a pasta limpa
-    if os.path.exists(PASTA_SAIDA):
-        shutil.rmtree(PASTA_SAIDA)
-    os.makedirs(PASTA_SAIDA)
-    
-    try:
-        # Lê o CSV (ajuste o nome da coluna se necessário, geralmente é 'message' ou 'content')
-        df = pd.read_csv(ARQUIVO_CSV, nrows=LIMITE_ARQUIVOS)
-        
-        print(f"Extraindo {len(df)} emails para arquivos individuais...")
-        
-        count = 0
-        for index, row in df.iterrows():
-            # Tenta pegar o conteúdo. Se o CSV tiver coluna 'message', 'text' ou 'content'
-            conteudo = str(row.get('message', row.get('text', row.iloc[0])))
-            
-            # Cria um arquivo .txt para cada email
-            nome_arquivo = os.path.join(PASTA_SAIDA, f"email_{index}.txt")
-            
-            with open(nome_arquivo, 'w', encoding='utf-8') as f:
-                f.write(conteudo)
-            
-            count += 1
-            if count % 1000 == 0:
-                print(f"{count} arquivos criados...")
+print(f"--- Lendo {ARQUIVO_CSV} ---")
 
-        print(f"\nSucesso! {count} arquivos criados na pasta '{PASTA_SAIDA}'.")
-        print("Agora você pode rodar o algoritmo de teste apontando para essa pasta.")
-        
-    except Exception as e:
-        print(f"Erro ao ler o CSV: {e}")
-        print("Dica: Verifique se o arquivo emails.csv está na pasta correta.")
+# Limpa a pasta se já existir (para não misturar testes)
+if os.path.exists(PASTA_SAIDA):
+    shutil.rmtree(PASTA_SAIDA)
+os.makedirs(PASTA_SAIDA)
 
-if __name__ == "__main__":
-    preparar_dataset_real()
+try:
+    # Lê o CSV
+    df = pd.read_csv(ARQUIVO_CSV, nrows=LIMITE_ARQUIVOS)
+    print(f"Processando {len(df)} emails...")
+
+    count = 0
+    for index, row in df.iterrows():
+        # Pega o conteúdo (ajuste 'message' se a coluna tiver outro nome)
+        conteudo = str(row.get('message', row.get('text', row.iloc[0])))
+        
+        # Cria arquivo individual
+        nome_arquivo = os.path.join(PASTA_SAIDA, f"email_{index}.txt")
+        with open(nome_arquivo, 'w', encoding='utf-8') as f:
+            f.write(conteudo)
+        
+        count += 1
+        if count % 1000 == 0:
+            print(f"{count} arquivos criados...")
+
+    print(f"\nSucesso! {count} arquivos prontos em '{PASTA_SAIDA}'.")
+
+except Exception as e:
+    print(f"Erro: {e}")
+    print("Verifique se você fez o upload do emails.csv na aba de arquivos à esquerda.")
