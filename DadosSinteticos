@@ -1,0 +1,137 @@
+import os
+import time
+import hashlib
+import zlib
+import tracemalloc
+import random
+import string
+import shutil
+import pandas as pd
+
+# --- CONFIGURAÇÕES DO EXPERIMENTO (Conforme Seção 2.5 e 2.7) ---
+DIRETORIO_TESTE = "./dataset_experimento"
+TAMANHO_BLOCO = 64 * 1024  # 64 KB (Streaming) [cite: 87]
+ALGORITMOS = ['md5', 'sha1', 'sha256', 'crc32'] # [cite: 63, 65]
+
+# --- 1. GERADOR DE DATASET SINTÉTICO ---
+def gerar_dataset_sintetico(caminho, num_arquivos=100, tam_max_kb=1024, taxa_duplicacao=0.3):
+    """
+    Gera arquivos aleatórios e cria duplicatas propositais para atingir a taxa desejada.
+    taxa_duplicacao: 0.3 significa 30% de duplicação.
+    """
+    if os.path.exists(caminho):
+        shutil.rmtree(caminho)
+    os.makedirs(caminho)
+    
+    arquivos_criados = []
+    
+    print(f"--- Gerando Dataset Sintético em: {caminho} ---")
+    print(f"Meta: {num_arquivos} arquivos, {taxa_duplicacao*100}% de duplicação.")
+
+    # Fase 1: Criar arquivos originais
+    qtd_originais = int(num_arquivos * (1 - taxa_duplicacao))
+    for i in range(qtd_originais):
+        nome_arq = os.path.join(caminho, f"arq_{i}.bin")
+        tamanho = random.randint(1, tam_max_kb) * 1024
+        dados = os.urandom(tamanho)
+        
+        with open(nome_arq, 'wb') as f:
+            f.write(dados)
+        arquivos_criados.append(nome_arq)
+
+    # Fase 2: Criar duplicatas (cópias de arquivos existentes)
+    qtd_duplicatas = num_arquivos - qtd_originais
+    for i in range(qtd_duplicatas):
+        origem = random.choice(arquivos_criados)
+        nome_dup = os.path.join(caminho, f"dup_{i}_de_{os.path.basename(origem)}")
+        shutil.copy(origem, nome_dup)
+    
+    print("Dataset gerado com sucesso.\n")
+
+# --- 2. FUNÇÃO DE HASHING E DEDUPLICAÇÃO ---
+def calcular_hash_arquivo(caminho_arquivo, algoritmo):
+    """Lê arquivo em streaming e retorna o hash."""
+    if algoritmo == 'crc32':
+        hash_obj = 0
+    else:
+        hash_obj = hashlib.new(algoritmo)
+    
+    with open(caminho_arquivo, 'rb') as f:
+        while chunk := f.read(TAMANHO_BLOCO): # Leitura em blocos [cite: 87]
+            if algoritmo == 'crc32':
+                hash_obj = zlib.crc32(chunk, hash_obj)
+            else:
+                hash_obj.update(chunk)
+                
+    if algoritmo == 'crc32':
+        return f"{hash_obj:08x}"
+    return hash_obj.hexdigest()
+
+def executar_experimento(diretorio, algoritmo):
+    """
+    Executa o fluxo de deduplicação e coleta métricas conforme Seção 2.8.
+    """
+    tracemalloc.start() # Inicia medição de memória [cite: 66]
+    tempo_inicio = time.perf_counter() # [cite: 67]
+    
+    tabela_hash = {} # A estrutura de indexação
+    duplicatas_detectadas = 0
+    colisoes = 0
+    total_arquivos = 0
+    
+    arquivos = [os.path.join(dp, f) for dp, dn, filenames in os.walk(diretorio) for f in filenames]
+    total_arquivos = len(arquivos)
+
+    for arquivo in arquivos:
+        # Gera hash
+        assinatura = calcular_hash_arquivo(arquivo, algoritmo)
+        
+        # Verifica existência na tabela hash [cite: 93]
+        if assinatura in tabela_hash:
+            # Em um cenário real, aqui faríamos a verificação byte-a-byte [cite: 94]
+            # Para fins de teste de performance do hash, assumimos detecção.
+            # Verificação simples de colisão (simulada):
+            caminho_existente = tabela_hash[assinatura]
+            if os.path.getsize(caminho_existente) == os.path.getsize(arquivo):
+                 duplicatas_detectadas += 1
+            else:
+                 colisoes += 1
+        else:
+            tabela_hash[assinatura] = arquivo
+
+    tempo_fim = time.perf_counter()
+    tempo_total = tempo_fim - tempo_inicio
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    
+    pico_memoria_mb = peak / (1024 * 1024) # Converter para MB
+    tempo_medio = tempo_total / total_arquivos if total_arquivos > 0 else 0
+
+    return {
+        "Algoritmo": algoritmo,
+        "Tempo Total (s)": round(tempo_total, 4),
+        "Tempo Médio/Arq (s)": round(tempo_medio, 5),
+        "Pico Memória (MB)": round(pico_memoria_mb, 4),
+        "Duplicatas": duplicatas_detectadas,
+        "Colisões": colisoes
+    }
+
+# --- 3. EXECUÇÃO PRINCIPAL ---
+if __name__ == "__main__":
+    # Gera dataset pequeno para teste rápido 
+    gerar_dataset_sintetico(DIRETORIO_TESTE, num_arquivos=500, tam_max_kb=5000, taxa_duplicacao=0.3)
+    
+    resultados = []
+    
+    print(f"{'Algoritmo':<10} | {'Tempo (s)':<10} | {'Memória (MB)':<12} | {'Duplicatas'}")
+    print("-" * 50)
+    
+    for algo in ALGORITMOS:
+        res = executar_experimento(DIRETORIO_TESTE, algo)
+        resultados.append(res)
+        print(f"{res['Algoritmo']:<10} | {res['Tempo Total (s)']:<10} | {res['Pico Memória (MB)']:<12} | {res['Duplicatas']}")
+    
+    # Exportar para analisar depois (CSV)
+    df = pd.DataFrame(resultados)
+    print("\nResumo Final:")
+    print(df)
