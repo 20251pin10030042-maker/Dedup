@@ -1,0 +1,102 @@
+import os
+import time
+import hashlib
+import zlib
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# --- 1. CONFIGURAÇÃO E GERAÇÃO DA BASE PESADA ---
+DIRETORIO_PESADO = "/content/dataset_pesado"
+ALGORITMOS = ['md5', 'sha1', 'sha256', 'crc32']
+TAMANHO_BLOCO = 64 * 1024  # 64KB
+
+def gerar_arquivos_pesados():
+    print(f"--- Gerando Dataset Pesado em: {DIRETORIO_PESADO} ---")
+    if os.path.exists(DIRETORIO_PESADO):
+        import shutil
+        shutil.rmtree(DIRETORIO_PESADO)
+    os.makedirs(DIRETORIO_PESADO)
+
+    # Cria 5 arquivos de 100MB cada (Total 500MB)
+    # Usamos um buffer aleatório repetido para ser rápido de criar, 
+    # mas que obriga o hash a processar dados reais.
+    buffer_1mb = os.urandom(1024 * 1024) 
+    
+    for i in range(5):
+        nome_arq = os.path.join(DIRETORIO_PESADO, f"arquivo_grande_{i}.bin")
+        print(f"Criando {nome_arq} (100 MB)...")
+        with open(nome_arq, 'wb') as f:
+            for _ in range(100): # 100 x 1MB = 100MB
+                f.write(buffer_1mb)
+    print("Base pesada criada com sucesso!\n")
+
+# --- 2. FUNÇÃO DE EXECUÇÃO (Reutilizando lógica) ---
+def rodar_teste_pesado():
+    resultados = []
+    print(f"{'Algoritmo':<10} | {'Tempo (s)':<10} | {'Velocidade (MB/s)'}")
+    print("-" * 50)
+
+    arquivos = [os.path.join(DIRETORIO_PESADO, f) for f in os.listdir(DIRETORIO_PESADO)]
+    total_volume_mb = 500 # Sabemos que são 500MB
+
+    for algo in ALGORITMOS:
+        tempo_inicio = time.perf_counter()
+        
+        # Processamento
+        for arquivo in arquivos:
+            if algo == 'crc32':
+                hash_obj = 0
+                with open(arquivo, 'rb') as f:
+                    while chunk := f.read(TAMANHO_BLOCO):
+                        hash_obj = zlib.crc32(chunk, hash_obj)
+            else:
+                hash_obj = hashlib.new(algo)
+                with open(arquivo, 'rb') as f:
+                    while chunk := f.read(TAMANHO_BLOCO):
+                        hash_obj.update(chunk)
+
+        tempo_fim = time.perf_counter()
+        tempo_total = tempo_fim - tempo_inicio
+        velocidade = total_volume_mb / tempo_total
+        
+        resultados.append({
+            "Algoritmo": algo,
+            "Tempo Total (s)": round(tempo_total, 4),
+            "Velocidade (MB/s)": round(velocidade, 2)
+        })
+        print(f"{algo:<10} | {tempo_total:.4f}s    | {velocidade:.2f} MB/s")
+
+    return pd.DataFrame(resultados)
+
+# --- 3. EXECUÇÃO E GRÁFICO ---
+if __name__ == "__main__":
+    gerar_arquivos_pesados()
+    df_pesado = rodar_teste_pesado()
+
+    # Gerar Gráfico
+    plt.figure(figsize=(10, 6))
+    sns.set_theme(style="whitegrid")
+    
+    # Gráfico corrigido (sem o erro vermelho)
+    ax = sns.barplot(
+        x="Algoritmo", 
+        y="Tempo Total (s)", 
+        data=df_pesado, 
+        palette="magma", 
+        hue="Algoritmo", 
+        legend=False
+    )
+    
+    plt.title("Latência em Arquivos Grandes (500 MB)", fontsize=14, fontweight='bold')
+    plt.ylabel("Tempo de Processamento (segundos)")
+    plt.xlabel("Algoritmo")
+    
+    # Adicionar rótulos nas barras
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.2fs', padding=3)
+
+    plt.show()
+    
+    # Salvar CSV
+    df_pesado.to_csv('resultados_pesados.csv', index=False)
