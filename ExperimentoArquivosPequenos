@@ -1,0 +1,80 @@
+import os
+import time
+import hashlib
+import zlib
+import tracemalloc
+import pandas as pd
+
+# --- CONFIGURAÇÕES ---
+DIRETORIO_TESTE = "/content/dataset_real_emails"
+ALGORITMOS = ['md5', 'sha1', 'sha256', 'crc32']
+TAMANHO_BLOCO = 64 * 1024  # 64KB
+
+def calcular_hash_arquivo(caminho_arquivo, algoritmo):
+    if algoritmo == 'crc32':
+        hash_obj = 0
+    else:
+        hash_obj = hashlib.new(algoritmo)
+    
+    with open(caminho_arquivo, 'rb') as f:
+        while chunk := f.read(TAMANHO_BLOCO):
+            if algoritmo == 'crc32':
+                hash_obj = zlib.crc32(chunk, hash_obj)
+            else:
+                hash_obj.update(chunk)
+                
+    if algoritmo == 'crc32':
+        return f"{hash_obj:08x}"
+    return hash_obj.hexdigest()
+
+def executar_experimento(diretorio, algoritmo):
+    tracemalloc.start()
+    tempo_inicio = time.perf_counter()
+    
+    tabela_hash = {}
+    duplicatas = 0
+    colisoes = 0
+    
+    arquivos = [os.path.join(dp, f) for dp, dn, filenames in os.walk(diretorio) for f in filenames]
+    total_arquivos = len(arquivos)
+    
+    for arquivo in arquivos:
+        assinatura = calcular_hash_arquivo(arquivo, algoritmo)
+        if assinatura in tabela_hash:
+            # Simplificação para o teste de performance
+            duplicatas += 1
+        else:
+            tabela_hash[assinatura] = arquivo
+
+    tempo_fim = time.perf_counter()
+    tempo_total = tempo_fim - tempo_inicio
+    current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    
+    return {
+        "Algoritmo": algoritmo,
+        "Tempo Total (s)": round(tempo_total, 4),
+        "Tempo Médio (s)": round(tempo_total / total_arquivos, 5) if total_arquivos else 0,
+        "Memória (MB)": round(peak / (1024 * 1024), 4),
+        "Duplicatas": duplicatas
+    }
+
+# --- EXECUÇÃO ---
+resultados = []
+print(f"Iniciando testes em: {DIRETORIO_TESTE}")
+print("-" * 60)
+
+for algo in ALGORITMOS:
+    print(f"Rodando {algo}...", end="\r")
+    res = executar_experimento(DIRETORIO_TESTE, algo)
+    resultados.append(res)
+    print(f"Concluído {algo}: {res['Tempo Total (s)']}s")
+
+# Mostra a tabela bonita no Colab
+df_resultados = pd.DataFrame(resultados)
+print("\n--- RESULTADOS FINAIS ---")
+display(df_resultados)
+
+# Salva em um arquivo para você baixar
+df_resultados.to_csv('resultados_tcc.csv', index=False)
+print("\nArquivo 'resultados_tcc.csv' salvo! Baixe na aba de arquivos.")
